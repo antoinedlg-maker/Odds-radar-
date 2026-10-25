@@ -46,6 +46,7 @@ class Config:
     min_surebet_profit: float
     min_value_edge: float
     max_value_odds: float
+    odds_error_threshold: float
     min_credits_reserve: int
 
     @property
@@ -76,6 +77,7 @@ class Config:
             min_surebet_profit=_float("MIN_SUREBET_PROFIT", 0.5),
             min_value_edge=_float("MIN_VALUE_EDGE", 3.0),
             max_value_odds=_float("MAX_VALUE_ODDS", 10.0),
+            odds_error_threshold=_float("ODDS_ERROR_THRESHOLD", 25.0),
             min_credits_reserve=_int("MIN_CREDITS_RESERVE", 20) or 0,
         )
 

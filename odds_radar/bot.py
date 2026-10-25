@@ -13,6 +13,7 @@ from discord import app_commands
 from discord.ext import tasks
 
 from .analysis import find_surebets, find_value_bets
+from .anomalies import anomaly_embed, find_odds_anomalies
 from .config import Config, book_name
 from .formatting import event_embed, surebet_embed, value_embed
 from .models import Event
@@ -92,6 +93,14 @@ class OddsRadar(discord.Client):
             max_odds=self.cfg.max_value_odds,
         )
 
+    def odds_anomalies(self):
+        # on inclut Pinnacle : plus il y a de bookmakers, plus la médiane est fiable
+        return find_odds_anomalies(
+            self.all_events,
+            self.cfg.fetched_bookmakers,
+            min_gap_pct=self.cfg.odds_error_threshold,
+        )
+
     async def post_alerts(self) -> None:
         if not self.cfg.alert_channel_id:
             return
@@ -101,8 +110,11 @@ class OddsRadar(discord.Client):
         now = time.time()
         # on oublie les alertes de plus de 2 jours
         self.seen = {k: t for k, t in self.seen.items() if now - t < 2 * 86400}
-        for item, make in [*((s, surebet_embed) for s in self.surebets()),
-                           *((v, value_embed) for v in self.value_bets())]:
+        for item, make in [
+            *((s, surebet_embed) for s in self.surebets()),
+            *((v, value_embed) for v in self.value_bets()),
+            *((a, anomaly_embed) for a in self.odds_anomalies()),
+        ]:
             if item.key in self.seen:
                 continue
             self.seen[item.key] = now
@@ -151,6 +163,14 @@ def _register_commands(bot: OddsRadar) -> None:
             return
         await interaction.response.send_message(embeds=[value_embed(v) for v in found[:5]])
 
+    @tree.command(name="erreurs", description="Erreurs de cotes possibles (cote très au-dessus des autres)")
+    async def erreurs(interaction: discord.Interaction):
+        found = bot.odds_anomalies()
+        if not found:
+            await interaction.response.send_message("Aucune erreur de cote détectée.", ephemeral=True)
+            return
+        await interaction.response.send_message(embeds=[anomaly_embed(a) for a in found[:5]])
+
     @tree.command(name="scan", description="Relance une récupération des cotes (consomme des crédits)")
     async def scan(interaction: discord.Interaction):
         wait = MANUAL_SCAN_COOLDOWN - (time.time() - bot.last_manual_scan)
@@ -165,7 +185,8 @@ def _register_commands(bot: OddsRadar) -> None:
         await bot.post_alerts()
         n = len(bot.all_events)
         await interaction.followup.send(
-            f"Scan terminé : {n} matchs, {len(bot.surebets())} surebets, {len(bot.value_bets())} value bets."
+            f"Scan terminé : {n} matchs, {len(bot.surebets())} surebets, "
+            f"{len(bot.value_bets())} value bets, {len(bot.odds_anomalies())} erreurs de cotes."
         )
 
     @tree.command(name="statut", description="Crédits API restants et réglages")
@@ -178,7 +199,8 @@ def _register_commands(bot: OddsRadar) -> None:
             f"**Championnats** : {', '.join(bot.cfg.sports)}\n"
             f"**Scan auto** : toutes les {bot.cfg.scan_interval_minutes} min · dernier : {last}\n"
             f"**Crédits API** : {u.remaining if u.remaining is not None else '?'} restants\n"
-            f"**Seuils** : surebet ≥ {bot.cfg.min_surebet_profit} % · value ≥ {bot.cfg.min_value_edge} %"
+            f"**Seuils** : surebet ≥ {bot.cfg.min_surebet_profit} % · value ≥ {bot.cfg.min_value_edge} % "
+            f"· erreur de cote ≥ {bot.cfg.odds_error_threshold:g} %"
         )
         await interaction.response.send_message(msg, ephemeral=True)
 
